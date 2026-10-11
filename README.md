@@ -143,6 +143,8 @@ GitHub Actionsの`Dependency audit`は手動実行でき、検査結果をその
 
 pgx・x/net・x/crypto・x/text・gRPC・OpenTelemetry trace側など、互換性を保って修正できた間接依存は更新済みです。
 
+module単位では[x/cryptoのGO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932)も検出されますが、今回の検査では対象packageのimport・対象symbolへの到達はありません。脆弱性検査の出力から除外していません。
+
 ## Docker image
 
 ```sh
