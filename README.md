@@ -119,7 +119,7 @@ type Task struct {
 
 リクエストは`app/http/requests/task_request.go`、レスポンスのpresentationは`app/http/resources/task_resource.go`へ分けています。採用中のGoravel v1.18.0にはLaravelの`JsonResource`相当の組み込み機能がないため、Goの型で`TaskResource`・`TaskCollection`を定義しています。Goravelの`ResourceController`はCRUDルートを登録するための機能です。
 
-ResourceはModelを埋め込まず、`id`・`title`・`description`・`completed`・`created_at`・`updated_at`だけを公開します。日時はUTCのRFC 3339形式です。Modelの項目が増えてもAPIの公開項目は自動で増えません。
+ResourceはModelを埋め込まず、`id`・`title`・`description`・`completed`・`created_at`・`updated_at`だけを公開します。日時はUTCのRFC 3339形式で、小数秒はPostgreSQLと同じマイクロ秒精度（最大6桁）へ揃えます。Modelの項目が増えてもAPIの公開項目は自動で増えません。
 
 ```go
 // controllerではModelをレスポンス用の型へ変換して返す。

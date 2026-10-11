@@ -35,9 +35,9 @@ type PaginationMeta struct {
 func NewTaskResource(task models.Task) TaskResource {
 	return TaskResource{
 		ID: task.ID, Title: task.Title, Description: task.Description, Completed: task.Completed,
-		// carbonのDB向け表現を境界で変換し、APIの日時をUTCのRFC 3339に揃える。
-		CreatedAt: task.CreatedAt.StdTime().UTC(),
-		UpdatedAt: task.UpdatedAt.StdTime().UTC(),
+		// PostgreSQLの保存精度へ揃え、作成直後とDB読み戻し後で日時が変わることを防ぐ。
+		CreatedAt: task.CreatedAt.StdTime().UTC().Truncate(time.Microsecond),
+		UpdatedAt: task.UpdatedAt.StdTime().UTC().Truncate(time.Microsecond),
 	}
 }
 

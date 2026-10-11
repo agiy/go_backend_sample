@@ -12,9 +12,12 @@ import (
 	"time"
 
 	testinghttp "github.com/goravel/framework/contracts/testing/http"
+	"github.com/goravel/framework/support/carbon"
 	"github.com/stretchr/testify/require"
 
 	"github.com/agiy/go_backend_sample/app/facades"
+	"github.com/agiy/go_backend_sample/app/http/resources"
+	"github.com/agiy/go_backend_sample/app/models"
 	"github.com/agiy/go_backend_sample/tests"
 )
 
@@ -35,6 +38,25 @@ type taskPageRecord struct {
 		PerPage int   `json:"per_page"`
 		Total   int64 `json:"total"`
 	} `json:"meta"`
+}
+
+func TestTaskResourceTimestamp(t *testing.T) {
+	// OSの時計精度に依存せず、Linuxのナノ秒とPostgreSQLのマイクロ秒の差を再現する。
+	createdAt := time.Date(2026, time.October, 11, 22, 0, 0, 123456789, time.FixedZone("JST", 9*60*60))
+	updatedAt := time.Date(2026, time.October, 11, 22, 1, 0, 987654321, time.FixedZone("JST", 9*60*60))
+	task := models.Task{
+		CreatedAt: carbon.NewDateTime(carbon.New(createdAt)),
+		UpdatedAt: carbon.NewDateTime(carbon.New(updatedAt)),
+	}
+	body, err := json.Marshal(resources.NewTaskResource(task))
+	require.NoError(t, err)
+	var actual struct {
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	require.NoError(t, json.Unmarshal(body, &actual))
+	require.Equal(t, "2026-10-11T13:00:00.123456Z", actual.CreatedAt)
+	require.Equal(t, "2026-10-11T13:01:00.987654Z", actual.UpdatedAt)
 }
 
 func TestTaskCRUD(t *testing.T) {
