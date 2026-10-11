@@ -1,0 +1,166 @@
+version: "2"
+
+run:
+  timeout: 5m
+  relative-path-mode: gomod
+  issues-exit-code: 1
+  tests: true
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+  go: "1.27"
+
+linters:
+  default: none
+  enable:
+    - asasalint
+    - bidichk
+    - bodyclose
+    - canonicalheader
+    - containedctx
+    - contextcheck
+    - depguard
+    - durationcheck
+    - errcheck
+    - errname
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - forcetypeassert
+    - gocheckcompilerdirectives
+    - gocognit
+    - gocritic
+    - gomoddirectives
+    - gosec
+    - govet
+    - ineffassign
+    - iotamixing
+    - loggercheck
+    - makezero
+    - mirror
+    - modernize
+    - musttag
+    - nilnesserr
+    - nilnil
+    - noctx
+    - nolintlint
+    - nosprintfhostport
+    - predeclared
+    - reassign
+    - recvcheck
+    - revive
+    - rowserrcheck
+    - sloglint
+    - sqlclosecheck
+    - staticcheck
+    - thelper
+    - tparallel
+    - unconvert
+    - unqueryvet
+    - unused
+    - usestdlibvars
+    - usetesting
+    - wrapcheck
+
+  settings:
+    depguard:
+      rules:
+        architecture:
+          list-mode: lax
+          files:
+            - $all
+          deny:
+            - pkg: "log$"
+              desc: 構造化logはlog/slogへ統一する
+            - pkg: "github.com/pkg/errors"
+              desc: error wrappingには標準libraryを使用する
+            - pkg: "github.com/sirupsen/logrus"
+              desc: loggingには標準libraryのlog/slogを使用する
+            - pkg: "github.com/rs/zerolog"
+              desc: loggingには標準libraryのlog/slogを使用する
+            - pkg: "go.uber.org/zap"
+              desc: loggingには標準libraryのlog/slogを使用する
+            - pkg: "golang.org/x/crypto/openpgp"
+              desc: 保守終了かつ既知の設計上の問題があるopenpgp packageを使用しない
+        application-database:
+          list-mode: lax
+          files:
+            - ${config-path}/app/**.go
+            - ${config-path}/database/**.go
+          deny:
+            - pkg: "gorm.io/gorm"
+              desc: DB操作はGoravelのOrm・DB・Schema facadeを使用する
+            - pkg: "github.com/jackc/pgx"
+              desc: driverへの直接依存を避け、GoravelのDB契約を使用する
+            - pkg: "github.com/jmoiron/sqlx"
+              desc: DB accessはGoravelへ統一する
+            - pkg: "github.com/uptrace/bun"
+              desc: DB accessはGoravelへ統一する
+            - pkg: "github.com/mattn/go-sqlite3"
+              desc: テストを含めPostgreSQLの挙動で検証する
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+      disable-default-exclusions: true
+    gocognit:
+      min-complexity: 15
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    musttag:
+      functions:
+        - name: encoding/json/v2.Marshal
+          tag: json
+          arg-pos: 0
+    nilnil:
+      only-two: false
+      detect-opposite: true
+    nolintlint:
+      allow-unused: false
+      require-explanation: true
+      require-specific: true
+    revive:
+      severity: error
+      enable-default-rules: true
+      rules:
+        # exportされた識別子を独立した先頭語として要求する。
+        - name: exported
+      directives:
+        - name: specify-disable-reason
+          severity: error
+    rowserrcheck:
+      packages:
+        - github.com/jackc/pgx/v5
+    sloglint:
+      no-global: all
+      context: scope
+      static-msg: true
+      attr-only: true
+      forbidden-keys:
+        - time
+        - level
+        - msg
+        - source
+      key-naming-case: snake
+    wrapcheck:
+      report-internal-errors: false
+
+  exclusions:
+    generated: strict
+    warn-unused: true
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/agiy/go_backend_sample
+  exclusions:
+    generated: strict
+    warn-unused: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

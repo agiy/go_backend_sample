@@ -26,7 +26,7 @@ func (r *HealthController) Live(ctx contractshttp.Context) contractshttp.Respons
 
 // Ready はDBへ接続できる場合だけリクエストを受けられると判断する。
 func (r *HealthController) Ready(ctx contractshttp.Context) contractshttp.Response {
-	// ヘルスチェックが接続待ちで通常リクエストを圧迫しないよう上限を設ける。
+	// 接続済みpoolへのPingが通常リクエストを圧迫しないよう上限を設ける。
 	pingContext, cancel := context.WithTimeout(ctx.Context(), time.Second)
 	defer cancel()
 

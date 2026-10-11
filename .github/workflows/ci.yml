@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - name: Download modules
+        run: |
+          go mod download
+          go -C tools mod download
+      - name: Verify module files
+        run: |
+          go mod tidy -diff
+          go -C tools mod tidy -diff
+      - name: Check formatting
+        run: |
+          go tool -modfile=tools/go.mod golangci-lint fmt
+          git diff --exit-code -- '*.go'
+      - name: Lint
+        run: |
+          go tool -modfile=tools/go.mod golangci-lint config verify
+          go tool -modfile=tools/go.mod golangci-lint run
+      - name: Vet and build
+        run: |
+          go vet ./...
+          go build -trimpath -o bin/server .
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Prepare test environment
+        run: |
+          cp .env.testing.example .env.testing
+          go run . --env=.env.testing artisan key:generate
+          docker compose up -d --wait postgres
+      - name: Test HTTP and PostgreSQL with race detector
+        run: go test -race -count=1 ./... --env=.env.testing
+      - name: Stop database
+        if: always()
+        run: docker compose down

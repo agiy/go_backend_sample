@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+
 	"github.com/goravel/framework/support/path"
 
 	"github.com/agiy/go_backend_sample/app/facades"
@@ -31,7 +33,7 @@ func init() {
 			"public": map[string]any{
 				"driver": "local",
 				"root":   path.Storage("app/public"),
-				"url":    config.GetString("http.url") + "/storage",
+				"url":    fmt.Sprint(config.Env("APP_URL", "")) + "/storage",
 			},
 		},
 	})
