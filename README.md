@@ -1,6 +1,6 @@
 # go_backend_sample
 
-Goravelを使うWeb APIバックエンドの初期構成です。Makefileやコマンドを隠すwrapperは置かず、下記のコマンドを直接実行します。
+Goravelを使うWeb APIバックエンドのサンプルです。Task管理のCRUD APIを通してModel・Form Request・Resource・migrationの流れを確認できます。Makefileやコマンドを隠すwrapperは置かず、下記のコマンドを直接実行します。
 
 ## 採用構成
 
@@ -88,6 +88,70 @@ go run . artisan route:list
 
 `/health/live`はプロセスが動いていれば200、`/health/ready`はPostgreSQLへ接続できれば200、接続できなければ503を返します。JSONはそれぞれ`{"status":"ok"}`、`{"status":"unavailable"}`です。
 
+## Task ModelとCRUD API
+
+ローカルでコードと動作を見るためのTask管理APIです。認証・利用者ごとの認可は未実装で、Taskは全リクエストで共有します。
+
+| HTTP | path | 動作・成功時のstatus |
+| --- | --- | --- |
+| POST | `/api/tasks` | 作成。201と`Location` header |
+| GET | `/api/tasks` | 一覧。200、ID昇順、pagination付き |
+| GET | `/api/tasks/{id}` | 1件取得。200 |
+| PUT | `/api/tasks/{id}` | 全置換。200 |
+| DELETE | `/api/tasks/{id}` | 物理削除。204、bodyなし |
+
+入力はJSON bodyの`title`・`description`・`completed`だけを使います。タイトルは前後のUnicode空白を除去して1〜200文字、説明は最大2000文字です。文字数はbyte数ではなくUnicode code point数で数えます。説明の既定値は`""`、完了状態は`false`です。PUTでもタイトルが必須で、省略した説明・完了状態は既定値へ戻します。部分更新のPATCHは実装していません。
+
+文字列・booleanの型は厳密に扱い、`null`、文字列の`"false"`、数値の0、PostgreSQLが保存できないNUL文字を拒否します。IDやtimestampなど追加のbody項目はModelへ反映せず、query parameterで書き込み項目を補うこともできません。
+
+一覧は`page`（既定1、1〜1,000,000）・`per_page`（既定20、1〜100）で取得します。空の一覧は`data: []`です。JSON構文・ID・paginationの形式が不正なら400、対象がなければ404、Content-TypeがJSON以外なら415、入力検証で拒否した場合は422を返します。内部エラーは500と一般的なメッセージを返し、詳細をGoravelのログへ記録します。
+
+Modelは`app/models/task.go`です。`orm.Model`がID・作成日時・更新日時を持ち、アプリの項目を追加します。
+
+```go
+type Task struct {
+    orm.Model
+    Title       string `gorm:"column:title"`
+    Description string `gorm:"column:description"`
+    Completed   bool   `gorm:"column:completed"`
+}
+```
+
+リクエストは`app/http/requests/task_request.go`、レスポンスのpresentationは`app/http/resources/task_resource.go`へ分けています。採用中のGoravel v1.18.0にはLaravelの`JsonResource`相当の組み込み機能がないため、Goの型で`TaskResource`・`TaskCollection`を定義しています。Goravelの`ResourceController`はCRUDルートを登録するための機能です。
+
+ResourceはModelを埋め込まず、`id`・`title`・`description`・`completed`・`created_at`・`updated_at`だけを公開します。日時はUTCのRFC 3339形式です。Modelの項目が増えてもAPIの公開項目は自動で増えません。
+
+```go
+// controllerではModelをレスポンス用の型へ変換して返す。
+return ctx.Response().Json(http.StatusOK, resources.NewTaskResource(task))
+```
+
+単一のTaskは`{"id": 1, "title": "買い物", ...}`のようにResourceを直接返します。一覧は`{"data": [...], "meta": {"page": 1, "per_page": 20, "total": 1}}`です。`data`はGoravelの必須形式ではなく、paginationなど他の情報も返す場合に使う、このAPIの規約です。
+
+DBの正本は`database/migrations/20261011000001_create_tasks_table.go`です。NOT NULL、タイトルのVARCHAR(200)と空白だけを拒否するCHECK、説明の2000文字CHECK、説明・完了状態のDEFAULTを明記しています。更新時はGoravelのtransactionと行ロックを使い、存在確認から保存までの間に並行削除されることを防ぎます。`Save`で空文字・`false`も保存し、削除は行そのものを削除します。
+
+開発サーバーを起動して次のコマンドで確認できます。最初の応答の`id`を確認して`task_id`へ入れてください。
+
+```sh
+go run . artisan migrate
+
+curl --fail-with-body -i http://localhost:3000/api/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"買い物","description":"牛乳を買う"}'
+
+# 作成したTaskのIDを指定する。
+task_id=1
+
+curl --fail-with-body "http://localhost:3000/api/tasks?page=1&per_page=20"
+curl --fail-with-body "http://localhost:3000/api/tasks/$task_id"
+
+curl --fail-with-body -X PUT "http://localhost:3000/api/tasks/$task_id" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"買い物完了","description":"","completed":true}'
+
+curl --fail-with-body -i -X DELETE "http://localhost:3000/api/tasks/$task_id"
+```
+
 ## Formatter・Linter
 
 ```sh
@@ -149,7 +213,9 @@ go -C tools mod tidy -diff
 go -C tools/actionlint mod tidy -diff
 ```
 
-HTTP応答、migrationの適用→rollback→再適用、失敗jobのUUID一意制約、jobのNOT NULL制約、アプリ接続ユーザーの非superuser属性を実PostgreSQLで検証します。migration testは`APP_ENV=testing`かつDB名が`go_backend_sample_test`の場合だけschemaを変更します。同じテストDBを使う複数のtest実行を同時に起動しないでください。
+HTTP応答、migrationの適用→rollback→再適用、失敗jobのUUID一意制約、jobのNOT NULL制約、アプリ接続ユーザーの非superuser属性を実PostgreSQLで検証します。TaskのCRUDでは独立したSQL読み戻し、zero valueへの更新、物理削除、入力の型・Unicode文字数境界、Resourceの公開項目・日時形式、pagination、DBへの直接書き込みでも制約が働くことを確認します。
+
+migrationやTaskのtestは`APP_ENV=testing`かつDB名が`go_backend_sample_test`の場合だけDBを変更します。Taskのtestは専用DB内のTaskを全件削除して前後を隔離するため、テストDBに保存したTaskは残りません。同じテストDBを使う複数のtest実行を同時に起動しないでください。
 
 ## DBの運用
 
@@ -213,6 +279,9 @@ GoとAlpineのimageをdigestまで固定したmulti-stage buildで、apk package
 ```text
 app/facades/            Goravel serviceへの入口
 app/http/controllers/  HTTP controller
+app/http/requests/     入力検証・正規化
+app/http/resources/    公開項目・レスポンス形式
+app/models/            永続化するModel
 bootstrap/             provider・route・migration登録
 config/                各serviceの設定
 routes/                公開route
@@ -233,6 +302,6 @@ go run . artisan make:migration --help
 go run . artisan make:seeder --help
 ```
 
-CRUD・ログイン・業務tableの追加は次の段階です。AI機能用のOpenAI driverは今回不要なため導入していません。
+ログイン・利用者ごとの認可・業務固有のtableは次の段階です。AI機能用のOpenAI driverは今回不要なため導入していません。
 
 土台は[公式Goravel template](https://github.com/goravel/goravel/tree/v1.18.x)（commit `31651f646ccedf1701471bf01285111270a9d370`）です。元のMIT Licenseと著作権表記を`LICENSE`に保持しています。
