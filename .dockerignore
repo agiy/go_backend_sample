@@ -1,0 +1,12 @@
+.git
+.idea
+.agents
+.codex
+.env
+.env.*
+!.env.example
+storage
+tmp
+bin
+tools
+coverage.*

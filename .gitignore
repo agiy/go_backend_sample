@@ -1,0 +1,13 @@
+.idea/
+.vscode/
+.DS_Store
+.env
+.env.*
+!.env.example
+!.env.testing.example
+storage/
+tmp/
+bin/
+coverage.out
+coverage.html
+build-errors.log
