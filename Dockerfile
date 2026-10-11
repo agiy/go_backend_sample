@@ -6,14 +6,14 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server .
 
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
-RUN apk add --no-cache ca-certificates tzdata \
-    && addgroup -S goravel && adduser -S -G goravel goravel
+RUN apk add --no-cache ca-certificates=20260909-r0 tzdata=2026e-r0 \
+    && addgroup -S -g 10001 goravel && adduser -S -u 10001 -G goravel goravel
 WORKDIR /app
 COPY --from=builder /out/server ./server
 COPY --from=builder /src/public ./public
 COPY --from=builder /src/resources ./resources
 RUN mkdir -p storage && chown -R goravel:goravel /app
-USER goravel
+USER 10001:10001
 ENV APP_ENV=production APP_DEBUG=false APP_HOST=0.0.0.0 APP_PORT=3000
 EXPOSE 3000
 ENTRYPOINT ["./server"]

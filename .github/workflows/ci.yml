@@ -23,22 +23,36 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
+            tools/actionlint/go.sum
       - name: Download modules
         run: |
           go mod download
           go -C tools mod download
+          go -C tools/actionlint mod download
       - name: Verify module files
         run: |
           go mod tidy -diff
           go -C tools mod tidy -diff
+          go -C tools/actionlint mod tidy -diff
       - name: Check formatting
-        run: |
-          go tool -modfile=tools/go.mod golangci-lint fmt
-          git diff --exit-code -- '*.go'
+        run: go tool -modfile=tools/go.mod golangci-lint fmt --diff
       - name: Lint
         run: |
           go tool -modfile=tools/go.mod golangci-lint config verify
           go tool -modfile=tools/go.mod golangci-lint run
+      - name: Check hooks and workflows
+        run: |
+          go tool -modfile=tools/go.mod lefthook validate
+          go tool -modfile=tools/actionlint/go.mod actionlint
+      - name: Install pinned Hadolint
+        run: |
+          mkdir -p bin
+          curl --fail --location --retry 3 "https://github.com/hadolint/hadolint/releases/download/v$(cat tools/hadolint.version)/hadolint-linux-x86_64" -o bin/hadolint-linux-x86_64
+          awk '$2 == "*hadolint-linux-x86_64"' tools/hadolint.sha256 | (cd bin && shasum -a 256 -c -)
+          chmod +x bin/hadolint-linux-x86_64
+          mv bin/hadolint-linux-x86_64 bin/hadolint
+      - name: Check Dockerfile
+        run: bin/hadolint --config .hadolint.yaml Dockerfile
       - name: Vet and build
         run: |
           go vet ./...

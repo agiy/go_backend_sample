@@ -14,10 +14,12 @@ Goravelを使うWeb APIバックエンドの初期構成です。Makefileやコ�
 | 認証の土台 | Goravel Session guard、file session。ログイン機能は未実装 |
 | 開発サーバー | Air v1.67.4 |
 | Formatter / Linter | golangci-lint v2.14.0、gofumpt + goimports |
+| Git hook | Lefthook v2.2.1。コミット時にstageした差分を検査 |
+| CI設定 / Dockerfile検査 | actionlint v1.7.12 / Hadolint v2.15.1 |
 | テスト | Go testing、Goravel HTTP testing、実PostgreSQL |
 | 依存の脆弱性検査 | govulncheck v1.8.0 |
 
-アプリ依存はルートの`go.mod`、開発ツールは`tools/go.mod`へ分離しています。グローバルな`go install ...@latest`は不要です。各moduleの`go.sum`も管理します。
+アプリ依存はルートの`go.mod`、開発ツールは`tools/go.mod`へ分離しています。actionlintはYAML依存のAPI競合を避けるため`tools/actionlint/go.mod`へ分離しています。グローバルな`go install ...@latest`は不要です。各moduleの`go.sum`も管理します。Hadolintは公式releaseのbinaryをSHA-256で確認して`bin/`へ配置します。
 
 ## 初回セットアップ
 
@@ -28,6 +30,33 @@ go version
 docker compose version
 go mod download
 go -C tools mod download
+go -C tools/actionlint mod download
+```
+
+続いてHadolintを導入します。macOS / Linuxのarm64・x86_64に対応します。`curl`と`shasum`を使用し、バージョンと検証用SHA-256の正本は`tools/hadolint.version`・`tools/hadolint.sha256`です。
+
+```sh
+(
+  set -eu
+  case "$(uname -s)/$(uname -m)" in
+    Darwin/arm64) hadolint_asset=hadolint-macos-arm64 ;;
+    Darwin/x86_64) hadolint_asset=hadolint-macos-x86_64 ;;
+    Linux/aarch64|Linux/arm64) hadolint_asset=hadolint-linux-arm64 ;;
+    Linux/x86_64) hadolint_asset=hadolint-linux-x86_64 ;;
+    *) echo "未対応のOS・architectureです" >&2; exit 1 ;;
+  esac
+  mkdir -p bin
+  curl --fail --location --retry 3 "https://github.com/hadolint/hadolint/releases/download/v$(cat tools/hadolint.version)/$hadolint_asset" -o "bin/$hadolint_asset"
+  awk -v asset="*$hadolint_asset" '$2 == asset' tools/hadolint.sha256 | (cd bin && shasum -a 256 -c -)
+  chmod +x "bin/$hadolint_asset"
+  mv "bin/$hadolint_asset" bin/hadolint
+)
+```
+
+Git hookを登録し、DBとアプリを初期化します。cloneした開発者ごとにhook登録が必要です。
+
+```sh
+go tool -modfile=tools/go.mod lefthook install
 
 # 初回だけ作成する。既存の.envと鍵を上書きしない。
 [ -f .env ] || cp .env.example .env
@@ -65,7 +94,7 @@ go run . artisan route:list
 # 整形を適用する。
 go tool -modfile=tools/go.mod golangci-lint fmt
 
-# 整形されていない差分を表示する。
+# 整形されていない差分を表示し、違反があればexit code 1で終了する。
 go tool -modfile=tools/go.mod golangci-lint fmt --diff
 
 # 全application codeとtestを検査する。
@@ -75,11 +104,36 @@ go tool -modfile=tools/go.mod golangci-lint run
 
 `.golangci.yml`を正本にして、error未確認・型assertion未確認・error wrapping不足・context漏れ・SQL resource漏れ・危険なコード・複雑度・公開APIの説明・未使用コードなどを検出します。問題数の表示上限を設けず、testも検査し、moduleの自動変更は許可しません。
 
+49種類のlinterを有効にしています。gofumptの追加規則3種類（同じ型の引数をまとめる・裸のreturnを明示する・複数行の関数呼び出しの閉じ括弧を揃える）、testifylintの全checker、gocriticのdiagnostic・style・performanceを追加しています。gocriticのexperimental・opinionatedは対象外です。
+
 DB accessはGoravelのfacadeへ統一します。`app/`・`database/`からGORM、pgx、sqlx、Bun、SQLiteへの直接依存を禁止しています。間接依存のGORM・pgxはGoravelの内部実装として利用します。テストもSQLiteへ置き換えません。
 
 `nolint`には対象linter名と理由を必須にします。現在の例外は、公式generatorが参照する`facades.Http()`の公開名を維持するための`revive`指定のみです。テンプレートやtest全体を除外する設定はありません。
 
-GitHub Actionsの`CI`はformatter適用後に`git diff --exit-code`で差分を拒否し、lint・vet・race detector付きtest・build・`go mod tidy -diff`を実行します。
+GitHub Actionsの`CI`は`fmt --diff`で整形違反を拒否し、全体のlint・vet・race detector付きtest・build・各moduleの`go mod tidy -diff`を実行します。Lefthook設定・GitHub Actions・Dockerfileも検査します。
+
+## コミット時の差分チェック
+
+```sh
+# stageしたファイルを手動で検査する。
+go tool -modfile=tools/go.mod lefthook run pre-commit
+
+# hookの設定と登録状態を確認する。
+go tool -modfile=tools/go.mod lefthook validate
+go tool -modfile=tools/go.mod lefthook check-install
+
+# CI設定・Dockerfileを全体検査する。
+go tool -modfile=tools/actionlint/go.mod actionlint
+bin/hadolint --config .hadolint.yaml Dockerfile
+```
+
+通常の`git commit`でも同じ検査が自動で動きます。`lefthook.yml`が実行コマンドの正本です。整形違反は差分を表示してコミットを止めるため、`golangci-lint fmt`で修正してから必要な変更をstageし直します。
+
+Goの整形はstageしたファイル全体、lintの指摘はstageした差分に含まれるファイル全体を対象にします。型・参照の解析にはpackage全体を使い、Goファイルの削除でもlintを起動します。`.golangci.yml`・アプリのmodule・共通ツールのmoduleを変更した場合は、Goの整形とlintを全体に実行します。moduleファイルの変更時は3つのmoduleの整合性も確認します。
+
+一部だけstageしたファイルはLefthookが未stage分を一時退避し、検査後に戻します。formatterの自動適用・自動stageは行いません。別ファイルの未stage変更はpackage解析に影響する場合があるため、型エラーもコミットを止めます。
+
+コミット時は変更したworkflowをactionlintで検査し、Dockerfile・Hadolint設定の変更時はDockerfileを検査します。Hadolintはstyleまでの全severityを失敗扱いにし、inline ignoreを許可しません。hookはローカルで回避できるため、CIでも全体検査を続けます。
 
 ## テスト・build
 
@@ -92,6 +146,7 @@ go vet ./...
 go build -trimpath -o bin/server .
 go mod tidy -diff
 go -C tools mod tidy -diff
+go -C tools/actionlint mod tidy -diff
 ```
 
 HTTP応答、migrationの適用→rollback→再適用、失敗jobのUUID一意制約、jobのNOT NULL制約、アプリ接続ユーザーの非superuser属性を実PostgreSQLで検証します。migration testは`APP_ENV=testing`かつDB名が`go_backend_sample_test`の場合だけschemaを変更します。同じテストDBを使う複数のtest実行を同時に起動しないでください。
@@ -151,7 +206,7 @@ module単位では[x/cryptoのGO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932
 docker build -t go_backend_sample:local .
 ```
 
-GoとAlpineのimageをdigestまで固定したmulti-stage buildで、実行ユーザーは非rootです。`.env`、開発ツール、Git metadataはimageに含めません。起動時に必要な環境変数を渡します。デプロイやproduction環境の構築は今回の範囲に含みません。
+GoとAlpineのimageをdigestまで固定したmulti-stage buildで、apk packageのバージョンも固定しています。実行ユーザーは非rootのUID / GID `10001:10001`です。`.env`、開発ツール、Git metadataはimageに含めません。起動時に必要な環境変数を渡します。デプロイやproduction環境の構築は今回の範囲に含みません。
 
 ## ディレクトリと機能追加
 

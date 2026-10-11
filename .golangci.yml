@@ -53,6 +53,7 @@ linters:
     - sqlclosecheck
     - staticcheck
     - thelper
+    - testifylint
     - tparallel
     - unconvert
     - unqueryvet
@@ -103,6 +104,14 @@ linters:
       disable-default-exclusions: true
     gocognit:
       min-complexity: 15
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-tags:
+        - experimental
+        - opinionated
     govet:
       enable-all: true
       disable:
@@ -142,6 +151,8 @@ linters:
         - msg
         - source
       key-naming-case: snake
+    testifylint:
+      enable-all: true
     wrapcheck:
       report-internal-errors: false
 
@@ -154,6 +165,11 @@ formatters:
     - gofumpt
     - goimports
   settings:
+    gofumpt:
+      extra:
+        group-params: true
+        clothe-returns: true
+        balance-calls: true
     goimports:
       local-prefixes:
         - github.com/agiy/go_backend_sample

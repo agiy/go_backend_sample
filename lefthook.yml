@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=https://lefthook.dev/schema.json
+min_version: "2.2.1"
+lefthook: go tool -modfile=tools/go.mod lefthook
+glob_matcher: doublestar
+
+pre-commit:
+  parallel: true
+  fail_on_changes: always
+  jobs:
+    - name: format-go
+      glob: "**/*.go"
+      exclude: "tools/**"
+      run: go tool -modfile=tools/go.mod golangci-lint fmt --diff {staged_files}
+
+    - name: lint-go
+      # 削除も解析の起点にする。Goはファイル単独でなくpackage全体を解析する。
+      files: git diff --cached --name-only --diff-filter=ACMRD
+      glob:
+        - "**/*.go"
+        - .golangci.yml
+        - go.mod
+        - go.sum
+        - tools/go.mod
+        - tools/go.sum
+      exclude: "tools/**/*.go"
+      run: |
+        set -eu
+        go tool -modfile=tools/go.mod golangci-lint config verify
+        if ! git diff --cached --quiet -- .golangci.yml go.mod go.sum tools/go.mod tools/go.sum; then
+          go tool -modfile=tools/go.mod golangci-lint fmt --diff
+          go tool -modfile=tools/go.mod golangci-lint run
+        else
+          staged_patch=$(mktemp)
+          trap 'rm -f "$staged_patch"' EXIT
+          git diff --cached --no-ext-diff --no-renames -- '*.go' > "$staged_patch"
+          go tool -modfile=tools/go.mod golangci-lint run --new-from-patch="$staged_patch" --whole-files
+        fi
+
+    - name: modules
+      glob:
+        - go.mod
+        - go.sum
+        - tools/go.mod
+        - tools/go.sum
+        - tools/actionlint/go.mod
+        - tools/actionlint/go.sum
+      run: |
+        set -eu
+        go mod tidy -diff
+        go -C tools mod tidy -diff
+        go -C tools/actionlint mod tidy -diff
+
+    - name: workflows
+      glob: ".github/workflows/*.{yml,yaml}"
+      run: go tool -modfile=tools/actionlint/go.mod actionlint {staged_files}
+
+    - name: dockerfile
+      glob:
+        - Dockerfile
+        - .hadolint.yaml
+        - tools/hadolint.version
+        - tools/hadolint.sha256
+      run: bin/hadolint --config .hadolint.yaml Dockerfile
+
+    - name: hook-config
+      glob: lefthook.yml
+      run: go tool -modfile=tools/go.mod lefthook validate
